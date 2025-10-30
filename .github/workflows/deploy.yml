@@ -1,0 +1,72 @@
+name: Deploy Frontend
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: self-hosted
+
+    steps:
+      - name: Checkout código
+        uses: actions/checkout@v4
+
+      - name: Parar container antigo
+        run: |
+          cd ~/pilian-app
+          docker compose stop frontend || true
+
+      - name: Atualizar código no servidor
+        run: |
+          cd ~/pilian-app/frontend
+          git fetch origin
+          git reset --hard origin/main
+
+      - name: Rebuild e restart do container
+        run: |
+          cd ~/pilian-app
+          docker compose up -d --build --no-deps frontend
+
+      - name: Aguardar frontend inicializar
+        run: |
+          echo "Aguardando frontend inicializar..."
+          sleep 20
+
+      - name: Verificar saúde do frontend
+        run: |
+          max_attempts=10
+          attempt=0
+
+          while [ $attempt -lt $max_attempts ]; do
+            if curl -f http://localhost > /dev/null 2>&1; then
+              echo "✅ Frontend está respondendo!"
+              exit 0
+            fi
+
+            echo "Tentativa $((attempt + 1))/$max_attempts - Aguardando frontend..."
+            sleep 5
+            attempt=$((attempt + 1))
+          done
+
+          echo "❌ Frontend não respondeu após $max_attempts tentativas"
+          docker compose logs frontend
+          exit 1
+
+      - name: Limpar imagens antigas
+        run: |
+          docker image prune -f
+
+      - name: Notificar sucesso
+        if: success()
+        run: |
+          echo "✅ Deploy do frontend concluído com sucesso!"
+          docker compose ps frontend
+
+      - name: Notificar falha
+        if: failure()
+        run: |
+          echo "❌ Deploy do frontend falhou!"
+          docker compose logs frontend
